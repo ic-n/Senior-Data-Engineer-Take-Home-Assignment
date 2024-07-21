@@ -1,0 +1,43 @@
+run:
+  concurrency: 4
+  timeout: 5m
+  issues-exit-code: 1
+  enable:
+    - errcheck     
+    - goerr113     
+    - govet        
+    - staticcheck  
+    - revive       
+  disable:
+    - lll          
+    - gocyclo      
+    - funlen       
+    - gomnd        
+
+linters-settings:
+  errcheck:
+    check-type-assertions: true
+    check-blank: true
+
+  goerr113:
+    errorf: true
+    wrap: true
+
+  govet:
+    vettool: ""
+
+  staticcheck:
+    checks: ["all"]
+
+  revive:
+    ignore-generated-header: true
+    severity: warning
+    config:
+      - rule: var-declaration
+        severity: error
+      - rule: blank-imports
+        severity: error
+      - rule: unhandled-error
+        severity: error
+      - rule: early-return
+        severity: error
