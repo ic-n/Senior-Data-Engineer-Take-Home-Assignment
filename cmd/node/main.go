@@ -12,6 +12,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethclient"
+	"github.com/ic-n/ERC4337analytics/pkg/contracts"
 	"github.com/urfave/cli/v2"
 )
 
@@ -48,8 +49,15 @@ func App(cctx *cli.Context) error {
 		return fmt.Errorf("failed to dial eth network: %w", err)
 	}
 
+	contractAddr := common.HexToAddress(targetAddr.Get(cctx))
+
 	query := ethereum.FilterQuery{
-		Addresses: []common.Address{common.HexToAddress(targetAddr.Get(cctx))},
+		Addresses: []common.Address{contractAddr},
+	}
+
+	contract, err := contracts.NewEntryPoint(contractAddr, client)
+	if err != nil {
+		return fmt.Errorf("failed to instantiate EntryPoint contract: %w", err)
 	}
 
 	targetEvents := make(chan types.Log)
@@ -58,7 +66,7 @@ func App(cctx *cli.Context) error {
 		return fmt.Errorf("failed to subscribe to logs: %w", err)
 	}
 
-	go subscribe(sub, targetEvents)
+	go subscribe(contract, sub, targetEvents)
 
 	s := http.Server{
 		Addr: ":80",
@@ -76,14 +84,19 @@ func App(cctx *cli.Context) error {
 	return nil
 }
 
-func subscribe(sub ethereum.Subscription, targetEvents chan types.Log) {
+func subscribe(contract *contracts.EntryPoint, sub ethereum.Subscription, targetEvents chan types.Log) {
 	ctx := context.Background()
 	for {
 		select {
 		case err := <-sub.Err():
 			log.ErrorContext(ctx, "error in log subscription", "error", err)
 		case targetEvent := <-targetEvents:
-			log.InfoContext(ctx, fmt.Sprintf("new event: %v\n", targetEvent))
+			userOperation, err := contract.ParseUserOperationEvent(targetEvent)
+			if err != nil {
+				log.ErrorContext(ctx, "failed to unpack data", "error", err)
+				continue
+			}
+			log.InfoContext(ctx, fmt.Sprintf("new event: %v\n", userOperation))
 		case <-time.After(time.Second * 3):
 			log.InfoContext(ctx, "no events")
 		}

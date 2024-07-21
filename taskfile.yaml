@@ -23,3 +23,13 @@ tasks:
         --datadir=.erigondata
         --bor.heimdall=https://heimdall-api.polygon.technology/
         --http.addr="0.0.0.0" --http.api=eth,web3,net,debug,trace,txpool
+  gen:
+    cmds:
+      - solc --optimize --optimize-runs 1000000 --via-ir --abi --bin ./contracts/EntryPoint.sol -o build --overwrite
+      - >
+        abigen --out ./pkg/contracts/entrypoint.go
+        --abi ./build/EntryPoint.abi
+        --bin=./build/EntryPoint.bin
+        --pkg contracts
+        --type EntryPoint
+      - go mod tidy
