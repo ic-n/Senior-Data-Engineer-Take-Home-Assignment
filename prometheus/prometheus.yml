@@ -1,0 +1,11 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: 'useropsmetrics'
+    static_configs:
+      - targets: ['metrics:2112']
+
+remote_write:
+  - url: "http://influxdb:8086/api/v1/prom/write?db=default"

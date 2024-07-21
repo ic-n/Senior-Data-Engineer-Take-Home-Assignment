@@ -1,0 +1,47 @@
+version: '3.7'
+
+services:
+  prometheus:
+    build:
+      context: prometheus
+      dockerfile: Dockerfile
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+    ports:
+      - "9090:9090"
+
+  influxdb:
+    image: influxdb:latest
+    ports:
+      - "8086:8086"
+    volumes:
+      - influxdb-data:/var/lib/influxdb
+
+  grafana:
+    image: grafana/grafana:latest
+    depends_on:
+      - prometheus
+      - influxdb
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=bicononomy-ripple
+    volumes:
+      - grafana-storage:/var/lib/grafana
+      - ./grafana-provisioning:/etc/grafana/provisioning
+      - ./grafana-provisioning/dashboards-config:/var/lib/grafana/dashboards
+
+  metrics:
+    env_file:
+      - metrics.env
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "2112:2112"
+    depends_on:
+      - prometheus
+
+volumes:
+  influxdb-data:
+  grafana-storage:

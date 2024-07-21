@@ -15,7 +15,6 @@ import (
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/ic-n/ERC4337analytics/pkg/contracts"
 	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/urfave/cli/v2"
 )
@@ -38,15 +37,19 @@ var (
 )
 
 var (
-	opsHourly = promauto.NewCounterVec(prometheus.CounterOpts{
+	opsMinutes = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "user_ops",
+		Help: "The number of processed events per hour",
+	}, []string{"success", "bundler", "minutes"})
+	opsHourly = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "user_ops_hourly",
 		Help: "The number of processed events per hour",
 	}, []string{"success", "bundler", "hour"})
-	opsDaily = promauto.NewCounterVec(prometheus.CounterOpts{
+	opsDaily = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "user_ops_daily",
 		Help: "The number of processed events per day",
 	}, []string{"success", "bundler", "day"})
-	opsWeekly = promauto.NewCounterVec(prometheus.CounterOpts{
+	opsWeekly = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "user_ops_weekly",
 		Help: "The number of processed events per week",
 	}, []string{"success", "bundler", "week"})
@@ -75,7 +78,12 @@ func App(cctx *cli.Context) error {
 	go subscribe()
 
 	m := http.NewServeMux()
-	m.Handle("/metrics", promhttp.Handler())
+	r := prometheus.NewRegistry()
+	r.MustRegister(opsMinutes)
+	r.MustRegister(opsHourly)
+	r.MustRegister(opsDaily)
+	r.MustRegister(opsWeekly)
+	m.Handle("/metrics", promhttp.HandlerFor(r, promhttp.HandlerOpts{}))
 
 	s := http.Server{
 		Addr:              ":2112",
@@ -147,7 +155,7 @@ func analyser(cctx *cli.Context) (func(common.Address, *contracts.EntryPointUser
 	}
 
 	bundlers := make(map[string]struct{})
-	for _, bx := range strings.Split(string(bundlersList), "\n") {
+	for _, bx := range strings.Split(strings.ToLower(string(bundlersList)), "\n") {
 		bundlers[bx] = struct{}{}
 	}
 
@@ -158,16 +166,18 @@ func analyser(cctx *cli.Context) (func(common.Address, *contracts.EntryPointUser
 		}
 
 		bundler := "0"
-		if _, ok := bundlers[address.Hex()]; ok {
+		if _, ok := bundlers[strings.ToLower(address.Hex())]; ok {
 			bundler = "1"
 		}
 
 		log.InfoContext(cctx.Context, "processing event", "bundler", bundler, "success", success, "userOp", userOperation)
 
 		n := time.Now()
+		minutes := n.Format("2006-01-02 15:04")
 		hour := n.Format("2006-01-02 15")
 		day := n.Format("2006-01-02")
 		week := n.Format("2006-W01")
+		opsMinutes.WithLabelValues(success, bundler, minutes).Inc()
 		opsHourly.WithLabelValues(success, bundler, hour).Inc()
 		opsDaily.WithLabelValues(success, bundler, day).Inc()
 		opsWeekly.WithLabelValues(success, bundler, week).Inc()

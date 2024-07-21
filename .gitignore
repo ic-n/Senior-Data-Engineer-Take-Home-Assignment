@@ -35,3 +35,4 @@ erigon
 .erigondata
 build
 bundlers.txt
+metrics.env
