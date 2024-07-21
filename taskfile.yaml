@@ -1,0 +1,25 @@
+version: '3'
+
+tasks:
+  install:
+    cmds:
+      - git clone --branch v2.60.4 --single-branch https://github.com/ledgerwatch/erigon.git
+      - task: erigon
+  build-erigon:
+    dir: erigon
+    cmds:
+      - make erigon
+    sources:
+      - erigon
+    generates:
+      - ./build/bin/erigon
+    method: timestamp
+  start-erigon:
+    dir: erigon
+    cmds:
+      - >
+        ./build/bin/erigon
+        --chain=bor-mainnet
+        --datadir=.erigondata
+        --bor.heimdall=https://heimdall-api.polygon.technology/
+        --http.addr="0.0.0.0" --http.api=eth,web3,net,debug,trace,txpool
