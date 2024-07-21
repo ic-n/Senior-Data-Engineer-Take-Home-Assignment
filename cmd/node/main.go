@@ -27,13 +27,17 @@ var (
 		Name:    "target",
 		EnvVars: []string{"TARGET_ADDR"},
 	}
+	bundlerAddr = &cli.StringFlag{
+		Name:    "bundler",
+		EnvVars: []string{"BUNDLER_ADDR"},
+	}
 )
 
 func main() {
 	app := &cli.App{
 		Name: "RC4337analytics",
 		Flags: []cli.Flag{
-			netURL, targetAddr,
+			netURL, targetAddr, bundlerAddr,
 		},
 		Action: App,
 	}
@@ -44,29 +48,12 @@ func main() {
 }
 
 func App(cctx *cli.Context) error {
-	client, err := ethclient.DialContext(cctx.Context, netURL.Get(cctx))
+	subscribe, err := subscriber(cctx)
 	if err != nil {
-		return fmt.Errorf("failed to dial eth network: %w", err)
+		return fmt.Errorf("failed to subscribe: %w", err)
 	}
 
-	contractAddr := common.HexToAddress(targetAddr.Get(cctx))
-
-	query := ethereum.FilterQuery{
-		Addresses: []common.Address{contractAddr},
-	}
-
-	contract, err := contracts.NewEntryPoint(contractAddr, client)
-	if err != nil {
-		return fmt.Errorf("failed to instantiate EntryPoint contract: %w", err)
-	}
-
-	targetEvents := make(chan types.Log)
-	sub, err := client.SubscribeFilterLogs(cctx.Context, query, targetEvents)
-	if err != nil {
-		return fmt.Errorf("failed to subscribe to logs: %w", err)
-	}
-
-	go subscribe(contract, sub, targetEvents)
+	go subscribe()
 
 	s := http.Server{
 		Addr: ":80",
@@ -84,21 +71,57 @@ func App(cctx *cli.Context) error {
 	return nil
 }
 
-func subscribe(contract *contracts.EntryPoint, sub ethereum.Subscription, targetEvents chan types.Log) {
+func subscriber(cctx *cli.Context) (func(), error) {
+	client, err := ethclient.DialContext(cctx.Context, netURL.Get(cctx))
+	if err != nil {
+		return nil, fmt.Errorf("failed to dial eth network: %w", err)
+	}
+
+	targetAddr := common.HexToAddress(targetAddr.Get(cctx))
+
+	query := ethereum.FilterQuery{
+		Addresses: []common.Address{targetAddr},
+	}
+
+	contract, err := contracts.NewEntryPoint(targetAddr, client)
+	if err != nil {
+		return nil, fmt.Errorf("failed to instantiate EntryPoint contract: %w", err)
+	}
+
+	targetEvents := make(chan types.Log)
+	sub, err := client.SubscribeFilterLogs(cctx.Context, query, targetEvents)
+	if err != nil {
+		return nil, fmt.Errorf("failed to subscribe to logs: %w", err)
+	}
+
 	ctx := context.Background()
-	for {
-		select {
-		case err := <-sub.Err():
-			log.ErrorContext(ctx, "error in log subscription", "error", err)
-		case targetEvent := <-targetEvents:
-			userOperation, err := contract.ParseUserOperationEvent(targetEvent)
-			if err != nil {
-				log.ErrorContext(ctx, "failed to unpack data", "error", err)
-				continue
+	analyse := analyser(cctx)
+
+	return func() {
+		for {
+			select {
+			case err := <-sub.Err():
+				log.ErrorContext(ctx, "error in log subscription", "error", err)
+			case targetEvent := <-targetEvents:
+				userOperation, err := contract.ParseUserOperationEvent(targetEvent)
+				if err != nil {
+					log.ErrorContext(ctx, "failed to unpack data", "error", err)
+					continue
+				}
+
+				log.InfoContext(ctx, fmt.Sprintf("new event: %v\n", userOperation))
+				go analyse(userOperation)
+			case <-time.After(time.Second * 3):
+				log.InfoContext(ctx, "no events")
 			}
-			log.InfoContext(ctx, fmt.Sprintf("new event: %v\n", userOperation))
-		case <-time.After(time.Second * 3):
-			log.InfoContext(ctx, "no events")
 		}
+	}, nil
+}
+
+func analyser(cctx *cli.Context) func(userOperation *contracts.EntryPointUserOperationEvent) {
+	bundlerAddr := common.HexToAddress(bundlerAddr.Get(cctx))
+
+	return func(userOperation *contracts.EntryPointUserOperationEvent) {
+		_ = bundlerAddr
 	}
 }
