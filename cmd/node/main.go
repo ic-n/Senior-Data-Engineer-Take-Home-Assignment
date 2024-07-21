@@ -31,24 +31,24 @@ var (
 		Name:    "target",
 		EnvVars: []string{"TARGET_ADDR"},
 	}
-	bundlers = &cli.StringFlag{
-		Name:    "bundlers",
-		EnvVars: []string{"BUNDLERS"},
+	bundlersFile = &cli.StringFlag{
+		Name:    "bundlers-file",
+		EnvVars: []string{"BUNDLERS_FILE"},
 	}
 )
 
 var (
 	opsHourly = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "user_ops_hourly",
-		Help: "The number of processed events from bundlers per hour",
+		Help: "The number of processed events per hour",
 	}, []string{"success", "bundler", "hour"})
 	opsDaily = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "user_ops_daily",
-		Help: "The number of processed events from bundlers per day",
+		Help: "The number of processed events per day",
 	}, []string{"success", "bundler", "day"})
 	opsWeekly = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "user_ops_weekly",
-		Help: "The number of processed events from bundlers per week",
+		Help: "The number of processed events per week",
 	}, []string{"success", "bundler", "week"})
 )
 
@@ -56,7 +56,7 @@ func main() {
 	app := &cli.App{
 		Name: "RC4337analytics",
 		Flags: []cli.Flag{
-			netURL, targetAddr, bundlers,
+			netURL, targetAddr, bundlersFile,
 		},
 		Action: App,
 	}
@@ -115,7 +115,10 @@ func subscriber(cctx *cli.Context) (func(), error) {
 	}
 
 	ctx := context.Background()
-	analyse := analyser(cctx)
+	analyse, err := analyser(cctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to init analyser: %w", err)
+	}
 
 	return func() {
 		for {
@@ -132,17 +135,19 @@ func subscriber(cctx *cli.Context) (func(), error) {
 				log.InfoContext(ctx, fmt.Sprintf("new event: %v\n", userOperation))
 
 				go analyse(targetEvent.Address, userOperation)
-			case <-time.After(time.Second * 3):
-				log.InfoContext(ctx, "no events")
 			}
 		}
 	}, nil
 }
 
-func analyser(cctx *cli.Context) func(common.Address, *contracts.EntryPointUserOperationEvent) {
-	bundlersList := strings.Split(bundlers.Get(cctx), ",")
+func analyser(cctx *cli.Context) (func(common.Address, *contracts.EntryPointUserOperationEvent), error) {
+	bundlersList, err := os.ReadFile(bundlersFile.Get(cctx))
+	if err != nil {
+		return nil, err
+	}
+
 	bundlers := make(map[string]struct{})
-	for _, bx := range bundlersList {
+	for _, bx := range strings.Split(string(bundlersList), "\n") {
 		bundlers[bx] = struct{}{}
 	}
 
@@ -166,5 +171,6 @@ func analyser(cctx *cli.Context) func(common.Address, *contracts.EntryPointUserO
 		opsHourly.WithLabelValues(success, bundler, hour).Inc()
 		opsDaily.WithLabelValues(success, bundler, day).Inc()
 		opsWeekly.WithLabelValues(success, bundler, week).Inc()
-	}
+		// we can add a lot of data ops here, like gas covered by paymasters etc
+	}, nil
 }
