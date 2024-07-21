@@ -38,18 +38,18 @@ var (
 )
 
 var (
-	opsTotal = promauto.NewCounter(prometheus.CounterOpts{
-		Name: "user_ops_total",
-		Help: "The total number of processed events",
-	})
-	opsBundlers = promauto.NewCounter(prometheus.CounterOpts{
-		Name: "user_ops_from_bundlers",
-		Help: "The number of processed events from bundlers",
-	})
-	opsUnknown = promauto.NewCounter(prometheus.CounterOpts{
-		Name: "user_ops_from_unknown",
-		Help: "The number of processed events from unknown",
-	})
+	opsHourly = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "user_ops_hourly",
+		Help: "The number of processed events from bundlers per hour",
+	}, []string{"success", "bundler", "hour"})
+	opsDaily = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "user_ops_daily",
+		Help: "The number of processed events from bundlers per day",
+	}, []string{"success", "bundler", "day"})
+	opsWeekly = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "user_ops_weekly",
+		Help: "The number of processed events from bundlers per week",
+	}, []string{"success", "bundler", "week"})
 )
 
 func main() {
@@ -147,14 +147,24 @@ func analyser(cctx *cli.Context) func(common.Address, *contracts.EntryPointUserO
 	}
 
 	return func(address common.Address, userOperation *contracts.EntryPointUserOperationEvent) {
-		_, bundler := bundlers[address.Hex()]
-		log.InfoContext(cctx.Context, "processing event", "bundler", bundler, "userOp", userOperation)
-
-		opsTotal.Inc()
-		if bundler {
-			opsBundlers.Inc()
-			return
+		success := "0"
+		if userOperation.Success {
+			success = "1"
 		}
-		opsUnknown.Inc()
+
+		bundler := "0"
+		if _, ok := bundlers[address.Hex()]; ok {
+			bundler = "1"
+		}
+
+		log.InfoContext(cctx.Context, "processing event", "bundler", bundler, "success", success, "userOp", userOperation)
+
+		n := time.Now()
+		hour := n.Format("2006-01-02 15")
+		day := n.Format("2006-01-02")
+		week := n.Format("2006-W01")
+		opsHourly.WithLabelValues(success, bundler, hour).Inc()
+		opsDaily.WithLabelValues(success, bundler, day).Inc()
+		opsWeekly.WithLabelValues(success, bundler, week).Inc()
 	}
 }
